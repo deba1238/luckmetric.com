@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LuckMetric - Compare & Earn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="pb-10">
+
+    <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-b-3xl shadow-lg text-center">
+        <h1 class="text-3xl font-extrabold mb-1"><i class="fa-solid fa-bolt"></i> LuckMetric</h1>
+        <p class="text-sm opacity-90 mb-4">Global Search & Price Compare</p>
+        
+        <div class="relative max-w-md mx-auto text-gray-800 shadow-xl rounded-xl">
+            <input type="text" id="searchInput" placeholder="Search 'iPhone 16' or Paste Link..." class="w-full p-4 rounded-xl outline-none pr-12 font-medium">
+            <button onclick="handleSearch()" class="absolute right-2 top-2 bg-gray-900 text-white p-2 rounded-lg hover:bg-gray-800 transition">
+                <i class="fa-solid fa-search"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="searchSection" class="max-w-md mx-auto mt-6 px-4 hidden transition-all duration-300">
+        <div class="flex justify-between items-center mb-3 border-b pb-2">
+            <h2 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-tags text-orange-500"></i> Compare Prices</h2>
+            <button onclick="closeSearch()" class="text-sm text-red-500 font-bold bg-red-50 px-3 py-1 rounded-full"><i class="fa-solid fa-times"></i> Close</button>
+        </div>
+        <div id="loadingUI" class="flex flex-col items-center justify-center py-12 hidden">
+            <div class="loader mb-3 scale-150"></div>
+            <p class="text-xs text-gray-500 font-medium animate-pulse">Searching global platforms safely...</p>
+        </div>
+        <div id="searchResults" class="space-y-4 mt-2"></div>
+    </div>
+
+    <div id="homeSection" class="max-w-md mx-auto mt-6 px-4">
+        <h2 class="text-lg font-bold text-gray-800 mb-3"><i class="fa-solid fa-fire text-orange-500"></i> Top Live Deals</h2>
+        <div id="campaignsList" class="space-y-4">
+            <div class="text-center text-gray-400 py-10"><div class="loader mx-auto scale-150"></div></div>
+        </div>
+    </div>
+
+    <script>
+        async function loadCampaigns() {
+            const container = document.getElementById('campaignsList');
+            try {
+                // CRITICAL: Explicitly request JSON and use absolute path
+                const res = await fetch('/api/campaigns', {
+                    method: 'GET',
+                    headers: { 
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const text = await res.text();
+                
+                // Debug: Log the raw response for troubleshooting
+                console.log('Raw response:', text.substring(0, 200));
+                console.log('Response status:', res.status);
+                console.log('Response content-type:', res.headers.get('content-type'));
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch(e) {
+                    container.innerHTML = `
+                        <div class="bg-red-100 text-red-800 p-4 rounded-xl border border-red-300 shadow-sm">
+                            <h3 class="font-bold text-sm mb-1"><i class="fa-solid fa-triangle-exclamation"></i> Frontend Parse Error (Status: ${res.status})</h3>
+                            <p class="text-xs font-mono break-words bg-white p-2 rounded mt-2">${text.substring(0, 500)}</p>
+                            <p class="text-xs mt-2 text-red-600">Cloudflare may not be routing to the function. Check your functions folder structure.</p>
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = '';
+                
+                if (data && data.length > 0 && data[0].is_error) {
+                    container.innerHTML = `
+                        <div class="bg-red-100 text-red-800 p-4 rounded-xl border border-red-300 shadow-sm">
+                            <h3 class="font-bold text-sm mb-1"><i class="fa-solid fa-bug"></i> Backend Debug Log</h3>
+                            <p class="text-xs font-mono break-words">${data[0].message}</p>
+                        </div>`;
+                    return;
+                }
+
+                if(!data || !Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = '<p class="text-center text-gray-500 text-sm font-medium mt-10">No active deals right now.</p>';
+                    return;
+                }
+
+                data.forEach(deal => {
+                    let plat = deal.platform ? deal.platform.toLowerCase() : 'unknown';
+                    let platColor = plat.includes('amazon') ? 'bg-amber-500' : plat.includes('flipkart') ? 'bg-blue-600' : 'bg-rose-500';
+                    
+                    container.innerHTML += `
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col hover:shadow-md transition duration-200">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="${platColor} text-white text-[10px] font-bold px-2.5 py-1 rounded uppercase tracking-wider">${deal.platform || 'DEAL'}</span>
+                                <span class="bg-green-100 text-green-700 text-[10px] font-bold px-2.5 py-1 rounded uppercase">${deal.user_luck_coins_text || 'Variable %'}</span>
+                            </div>
+                            <h3 class="text-sm font-bold text-gray-800 mb-3 leading-snug line-clamp-2">${deal.title}</h3>
+                            <a href="/go?plat=${plat}&url=${encodeURIComponent(deal.original_link)}" target="_blank" class="w-full text-center bg-gray-900 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-orange-500 transition duration-300">Grab Deal <i class="fa-solid fa-arrow-up-right-from-square ml-1 text-xs"></i></a>
+                        </div>
+                    `;
+                });
+            } catch(e) {
+                container.innerHTML = `
+                    <div class="bg-red-100 text-red-800 p-4 rounded-xl border border-red-300 shadow-sm">
+                        <h3 class="font-bold text-sm mb-1"><i class="fa-solid fa-network-wired"></i> Network/Fetch Error</h3>
+                        <p class="text-xs font-mono break-words">${e.message}</p>
+                        <p class="text-xs mt-2">Check your internet connection and try again.</p>
+                    </div>`;
+            }
+        }
+
+        async function handleSearch() {
+            let query = document.getElementById('searchInput').value.trim();
+            if(!query) return;
+
+            if(query.startsWith('http')) {
+                try {
+                    let urlObj = new URL(query);
+                    let slug = urlObj.pathname.split('/').filter(x => x.length > 3)[0] || "";
+                    query = slug.replace(/[-_]/g, ' ') || query;
+                } catch(e) {}
+            }
+
+            document.getElementById('homeSection').classList.add('hidden');
+            document.getElementById('searchSection').classList.remove('hidden');
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('loadingUI').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                document.getElementById('loadingUI').classList.add('hidden');
+
+                if(data.status === 'success') {
+                    let resultsHTML = '';
+                    for (const [platform, details] of Object.entries(data.platforms)) {
+                        let platColor = platform.includes('amazon') ? 'bg-amber-500' : platform.includes('flipkart') ? 'bg-blue-600' : 'bg-gray-800';
+                        resultsHTML += `
+                            <div class="bg-white p-4 flex justify-between items-center rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
+                                <div>
+                                    <div class="${platColor} inline-block text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide mb-1">${platform}</div>
+                                    <div class="font-extrabold text-gray-900 text-xl">₹${details.price.toLocaleString('en-IN')}</div>
+                                </div>
+                                <a href="/go?plat=${platform}&url=${encodeURIComponent(details.link)}" target="_blank" class="bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow hover:bg-orange-600 active:scale-95 transition">Buy Now</a>
+                            </div>
+                        `;
+                    }
+                    document.getElementById('searchResults').innerHTML = resultsHTML;
+                } else {
+                    document.getElementById('searchResults').innerHTML = `<p class="text-center text-gray-500 text-sm mt-8 font-medium">No exact match found or blocked by platform.</p>`;
+                }
+            } catch(e) {
+                document.getElementById('loadingUI').classList.add('hidden');
+                document.getElementById('searchResults').innerHTML = `<p class="text-center text-red-500 text-sm mt-8 font-medium">Network error. Try again.</p>`;
+            }
+        }
+
+        function closeSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchSection').classList.add('hidden');
+            document.getElementById('homeSection').classList.remove('hidden');
+        }
+
+        window.onload = loadCampaigns;
+    </script>
+</body>
+</html>
