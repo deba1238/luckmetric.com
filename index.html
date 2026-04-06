@@ -1,0 +1,702 @@
+<!--
+LUCKMETRIC DEPLOYMENT CHECKLIST:
+[ ] 1. GitHub repo root contains: index.html, _routes.json, functions/
+[ ] 2. functions/ directory has: go.js AND api/ subfolder
+[ ] 3. api/ contains: health.js, campaigns.js, search.js, go-link.js
+[ ] 4. NO wrangler.toml exists anywhere in the repo
+[ ] 5. Cloudflare Pages project connected to this GitHub repo
+[ ] 6. In Cloudflare Dashboard > Pages > Project > Settings >
+        Environment Variables:
+        SUPABASE_URL = https://xxxx.supabase.co
+        SUPABASE_KEY = your-service-role-key (NOT anon key)
+[ ] 7. Build settings: Framework = None, Build command = (empty),
+        Output directory = / (forward slash only)
+[ ] 8. Visit /api/health first to verify functions are working
+[ ] 9. Open browser DevTools Console while loading — check for errors
+[ ] 10. Supabase: Confirm campaigns table has at least 1 row of data
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LuckMetric - Compare & Earn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        gray: {
+                            900: '#111827',
+                            800: '#1F2937',
+                            700: '#374151',
+                            600: '#4B5563',
+                            500: '#6B7280',
+                            400: '#9CA3AF',
+                            300: '#D1D5DB',
+                            200: '#E5E7EB',
+                            100: '#F3F4F6',
+                            50: '#F9FAFB',
+                        },
+                        orange: {
+                            600: '#EA580C',
+                            500: '#F97316',
+                            400: '#FB923C',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            color: #F9FAFB;
+        }
+        
+        /* Marquee Animation */
+        .marquee-container {
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .marquee-content {
+            display: inline-block;
+            animation: marquee 20s linear infinite;
+        }
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        
+        /* Skeleton Pulse Animation */
+        .skeleton {
+            background: linear-gradient(90deg, #374151 25%, #4B5563 50%, #374151 75%);
+            background-size: 200% 100%;
+            animation: skeleton-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes skeleton-pulse {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        /* Card Hover Effect */
+        .deal-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .deal-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 40px rgba(249, 115, 22, 0.15);
+        }
+        
+        /* Line Clamp */
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4B5563;
+        }
+        
+        /* Search Dropdown */
+        .search-dropdown {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        /* Button Hover */
+        .btn-primary {
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover {
+            background-color: #EA580C;
+            transform: translateY(-1px);
+        }
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+        
+        /* Ghost Button */
+        .btn-ghost {
+            transition: all 0.2s ease;
+        }
+        .btn-ghost:hover {
+            background-color: rgba(249, 115, 22, 0.1);
+        }
+        
+        /* Platform Badge Glow */
+        .platform-badge {
+            transition: box-shadow 0.2s ease;
+        }
+        .platform-badge:hover {
+            box-shadow: 0 0 12px currentColor;
+        }
+        
+        /* Stats Counter Animation */
+        @keyframes countUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .stat-item {
+            animation: countUp 0.6s ease forwards;
+        }
+        
+        /* Sticky Header */
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            backdrop-filter: blur(10px);
+            background-color: rgba(17, 24, 39, 0.95);
+        }
+        
+        /* Fade In Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- SECTION 1: TOP HEADER BAR -->
+    <header class="sticky-header border-b border-gray-700">
+        <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <!-- Logo -->
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">🍀</span>
+                <span class="text-xl font-bold text-orange-500">LuckMetric</span>
+            </div>
+            
+            <!-- Auth Buttons -->
+            <div class="flex items-center gap-2">
+                <button class="btn-ghost text-gray-300 px-3 py-2 rounded-lg text-sm font-medium">
+                    Login
+                </button>
+                <button class="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 transition">
+                    Sign Up
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- SECTION 2: HERO ANNOUNCEMENT STRIP -->
+    <div class="bg-gradient-to-r from-orange-600 via-orange-500 to-orange-600 py-2 overflow-hidden">
+        <div class="marquee-container">
+            <div class="marquee-content text-sm font-medium text-white">
+                🔥 New Deals Added · Earn Luck Coins on Every Purchase · 🎯 Price Drop Alerts Now Live · 💸 Cashback Up to 30% · Refer & Earn · 
+                🔥 New Deals Added · Earn Luck Coins on Every Purchase · 🎯 Price Drop Alerts Now Live · 💸 Cashback Up to 30% · Refer & Earn ·
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 3: SEARCH BAR -->
+    <section class="max-w-lg mx-auto px-4 py-6">
+        <div class="relative">
+            <div class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                <i class="fa-solid fa-search"></i>
+            </div>
+            <input 
+                type="text" 
+                id="search-input" 
+                placeholder="Search products, brands, platforms..."
+                class="w-full bg-gray-800 border border-gray-700 text-gray-100 pl-11 pr-24 py-3.5 rounded-xl outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition text-sm"
+                autocomplete="off"
+            >
+            <button 
+                onclick="performSearch()"
+                class="absolute right-2 top-1/2 -translate-y-1/2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 transition"
+            >
+                Search
+            </button>
+        </div>
+        
+        <!-- Search Results Dropdown -->
+        <div id="search-dropdown" class="search-dropdown hidden mt-2 bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+            <!-- Search results will be rendered here -->
+        </div>
+    </section>
+
+    <!-- SECTION 4: STATS BAR -->
+    <section class="max-w-lg mx-auto px-4 pb-6">
+        <div class="grid grid-cols-3 gap-3">
+            <div class="stat-item bg-gray-800 border border-gray-700 rounded-xl p-3 text-center" style="animation-delay: 0.1s;">
+                <div class="text-orange-500 text-lg mb-1">🛒</div>
+                <div class="text-white font-bold text-sm">10,000+</div>
+                <div class="text-gray-400 text-xs">Deals Tracked</div>
+            </div>
+            <div class="stat-item bg-gray-800 border border-gray-700 rounded-xl p-3 text-center" style="animation-delay: 0.2s;">
+                <div class="text-orange-500 text-lg mb-1">💰</div>
+                <div class="text-white font-bold text-sm">₹4.2Cr+</div>
+                <div class="text-gray-400 text-xs">Cashback Given</div>
+            </div>
+            <div class="stat-item bg-gray-800 border border-gray-700 rounded-xl p-3 text-center" style="animation-delay: 0.3s;">
+                <div class="text-orange-500 text-lg mb-1">👥</div>
+                <div class="text-white font-bold text-sm">50,000+</div>
+                <div class="text-gray-400 text-xs">Active Users</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SECTION 5: LIVE DEALS GRID -->
+    <section class="max-w-lg mx-auto px-4 pb-8">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-white">
+                <i class="fa-solid fa-fire text-orange-500 mr-2"></i>Live Deals
+            </h2>
+            <span id="deal-count" class="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded-lg">Loading...</span>
+        </div>
+        
+        <!-- Deals Grid -->
+        <div id="deals-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Skeleton loaders will be rendered here initially -->
+        </div>
+    </section>
+
+    <!-- SECTION 6: HOW IT WORKS -->
+    <section class="max-w-lg mx-auto px-4 py-8 border-t border-gray-800">
+        <h2 class="text-xl font-bold text-white text-center mb-6">How It Works</h2>
+        <div class="space-y-4">
+            <!-- Step 1 -->
+            <div class="flex items-start gap-4 bg-gray-800 border border-gray-700 rounded-xl p-4">
+                <div class="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
+                    1
+                </div>
+                <div>
+                    <h3 class="text-white font-semibold mb-1">🔍 Browse Deals</h3>
+                    <p class="text-gray-400 text-sm">Find top deals from all major platforms in one place.</p>
+                </div>
+            </div>
+            
+            <!-- Step 2 -->
+            <div class="flex items-start gap-4 bg-gray-800 border border-gray-700 rounded-xl p-4">
+                <div class="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
+                    2
+                </div>
+                <div>
+                    <h3 class="text-white font-semibold mb-1">🛒 Shop & Earn</h3>
+                    <p class="text-gray-400 text-sm">Buy via our link, earn Luck Coins on every purchase.</p>
+                </div>
+            </div>
+            
+            <!-- Step 3 -->
+            <div class="flex items-start gap-4 bg-gray-800 border border-gray-700 rounded-xl p-4">
+                <div class="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
+                    3
+                </div>
+                <div>
+                    <h3 class="text-white font-semibold mb-1">💸 Withdraw Anytime</h3>
+                    <p class="text-gray-400 text-sm">Convert coins to real cash or crypto instantly.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SECTION 7: PLATFORM TRUST BADGES -->
+    <section class="max-w-lg mx-auto px-4 py-6 border-t border-gray-800">
+        <p class="text-center text-gray-400 text-sm mb-4">Trusted Platforms</p>
+        <div class="flex flex-wrap justify-center gap-2">
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Amazon</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Flipkart</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Myntra</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Meesho</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">AJIO</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Nykaa</span>
+            <span class="platform-badge bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full text-xs font-medium">Tata CLiQ</span>
+        </div>
+    </section>
+
+    <!-- SECTION 8: FOOTER -->
+    <footer class="bg-gray-900 border-t border-gray-800 py-8">
+        <div class="max-w-lg mx-auto px-4">
+            <!-- Logo & Tagline -->
+            <div class="text-center mb-6">
+                <div class="flex items-center justify-center gap-2 mb-2">
+                    <span class="text-2xl">🍀</span>
+                    <span class="text-xl font-bold text-orange-500">LuckMetric</span>
+                </div>
+                <p class="text-gray-400 text-sm">Earn while you shop. Powered by LuckMetric.</p>
+            </div>
+            
+            <!-- Links -->
+            <div class="flex flex-wrap justify-center gap-4 mb-6">
+                <a href="#" class="text-gray-400 text-sm hover:text-orange-500 transition">About</a>
+                <a href="#" class="text-gray-400 text-sm hover:text-orange-500 transition">Privacy Policy</a>
+                <a href="#" class="text-gray-400 text-sm hover:text-orange-500 transition">Terms</a>
+                <a href="#" class="text-gray-400 text-sm hover:text-orange-500 transition">Contact</a>
+            </div>
+            
+            <!-- Social Icons -->
+            <div class="flex justify-center gap-4 mb-6">
+                <a href="#" class="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-orange-500 hover:bg-gray-700 transition">
+                    <i class="fa-brands fa-telegram"></i>
+                </a>
+                <a href="#" class="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-orange-500 hover:bg-gray-700 transition">
+                    <i class="fa-brands fa-instagram"></i>
+                </a>
+                <a href="#" class="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-orange-500 hover:bg-gray-700 transition">
+                    <i class="fa-brands fa-twitter"></i>
+                </a>
+            </div>
+            
+            <!-- Copyright -->
+            <div class="text-center text-gray-500 text-xs">
+                © 2025 LuckMetric. All rights reserved.
+            </div>
+        </div>
+    </footer>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // Global state
+        let allCampaigns = [];
+
+        // Platform color mapper
+        function getPlatformColor(platform) {
+            const map = {
+                amazon: 'bg-orange-500',
+                flipkart: 'bg-blue-500',
+                myntra: 'bg-pink-500',
+                meesho: 'bg-purple-500',
+                ajio: 'bg-yellow-500',
+                nykaa: 'bg-rose-500',
+                'tata cliq': 'bg-indigo-500',
+                'tatacliq': 'bg-indigo-500'
+            };
+            const key = (platform || '').toLowerCase().trim();
+            return map[key] || 'bg-gray-500';
+        }
+
+        // Source badge mapper
+        function getSourceBadge(sourceType) {
+            if (sourceType === 'Manual') {
+                return '<span class="bg-green-500/20 text-green-400 text-[10px] px-2 py-0.5 rounded-full font-medium">✓ Curated</span>';
+            }
+            return '<span class="bg-gray-600/30 text-gray-400 text-[10px] px-2 py-0.5 rounded-full font-medium">⚡ Live</span>';
+        }
+
+        // Expiry countdown calculator
+        function getExpiry(expiryDate) {
+            if (!expiryDate) return '';
+            const diff = new Date(expiryDate) - new Date();
+            if (diff <= 0) return '<span class="text-red-400 text-[10px]">⛔ Expired</span>';
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            return `<span class="text-orange-400 text-[10px]">⏱ Ends in ${h}h ${m}m</span>`;
+        }
+
+        // Render skeleton loaders
+        function renderSkeletons(count = 6) {
+            const grid = document.getElementById('deals-grid');
+            let html = '';
+            for (let i = 0; i < count; i++) {
+                html += `
+                    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="skeleton w-16 h-5 rounded-full"></div>
+                            <div class="skeleton w-12 h-4 rounded-full"></div>
+                        </div>
+                        <div class="skeleton w-full h-4 rounded mb-2"></div>
+                        <div class="skeleton w-3/4 h-4 rounded mb-4"></div>
+                        <div class="skeleton w-full h-10 rounded-lg"></div>
+                    </div>
+                `;
+            }
+            grid.innerHTML = html;
+        }
+
+        // Render a single deal card
+        function renderCard(deal) {
+            const platformColor = getPlatformColor(deal.platform);
+            const sourceBadge = getSourceBadge(deal.source_type);
+            const expiryBadge = getExpiry(deal.expiry_date);
+            const platformName = deal.platform || 'Unknown';
+            const coinsText = deal.user_luck_coins_text || 'Variable %';
+            const title = deal.title || 'Untitled Deal';
+            const dealUrl = deal.original_link || '#';
+            
+            return `
+                <div class="deal-card bg-gray-800 border border-gray-700 rounded-xl p-4 fade-in">
+                    <!-- Top Row: Platform + Source + Expiry -->
+                    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="${platformColor} text-white text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wide">
+                                ${platformName}
+                            </span>
+                            ${sourceBadge}
+                        </div>
+                        ${expiryBadge}
+                    </div>
+                    
+                    <!-- Title -->
+                    <h3 class="text-white font-semibold text-sm mb-3 line-clamp-2 leading-relaxed">
+                        ${title}
+                    </h3>
+                    
+                    <!-- Coins Row -->
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="text-orange-400">🪙</span>
+                        <span class="text-orange-400 text-sm font-medium">${coinsText}</span>
+                    </div>
+                    
+                    <!-- CTA Button -->
+                    <button 
+                        onclick="window.open('/go?plat=${encodeURIComponent(platformName)}&url=${encodeURIComponent(dealUrl)}', '_blank')"
+                        class="btn-primary w-full bg-orange-500 text-white py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2"
+                    >
+                        🛒 Grab Deal <i class="fa-solid fa-arrow-right text-xs"></i>
+                    </button>
+                </div>
+            `;
+        }
+
+        // Render deals grid
+        function renderDeals(deals) {
+            const grid = document.getElementById('deals-grid');
+            const countEl = document.getElementById('deal-count');
+            
+            if (deals.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-span-full text-center py-12">
+                        <div class="text-4xl mb-3">📭</div>
+                        <p class="text-gray-400 font-medium mb-1">No deals available right now.</p>
+                        <p class="text-gray-500 text-sm">Check back soon!</p>
+                    </div>
+                `;
+                countEl.textContent = '0 deals';
+                return;
+            }
+            
+            grid.innerHTML = deals.map(renderCard).join('');
+            countEl.textContent = `${deals.length} deal${deals.length !== 1 ? 's' : ''}`;
+        }
+
+        // Show routing error UI
+        function showRoutingError(status, rawText) {
+            const grid = document.getElementById('deals-grid');
+            const countEl = document.getElementById('deal-count');
+            countEl.textContent = 'Error';
+            
+            const isHtml = rawText && rawText.includes('<!DOCTYPE') || rawText.includes('<html');
+            const previewText = isHtml ? '(HTML response - likely 404 page)' : rawText.substring(0, 200);
+            
+            grid.innerHTML = `
+                <div class="col-span-full">
+                    <div class="bg-red-900/30 border-2 border-red-500 rounded-xl p-5">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span class="text-2xl">⛔</span>
+                            <h3 class="text-red-400 font-bold text-lg">ROUTING CRITICAL ERROR</h3>
+                        </div>
+                        <p class="text-red-300 text-sm mb-4">
+                            Cloudflare Functions are being <strong>IGNORED</strong> by the build system.
+                        </p>
+                        
+                        <div class="bg-gray-900 rounded-lg p-3 mb-4">
+                            <p class="text-gray-400 text-xs mb-1">Response Status: <span class="text-red-400 font-mono">${status}</span></p>
+                            <p class="text-gray-500 text-xs font-mono break-all">${previewText}</p>
+                        </div>
+                        
+                        <p class="text-gray-300 text-sm font-semibold mb-2">Diagnostic Checklist:</p>
+                        <ul class="space-y-2 text-sm">
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400">Folder MUST be named <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">functions</code> (lowercase, plural)</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400">Folder MUST be at the <strong>root</strong> of your GitHub repo</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400"><code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">wrangler.toml</code> MUST NOT exist</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400">Files MUST export <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">async function onRequest(context)</code></span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400"><code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">_routes.json</code> MUST exist with <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">/api/*</code> include</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-red-400">✗</span>
+                                <span class="text-gray-400">Expected path: <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">/functions/api/campaigns.js</code></span>
+                            </li>
+                        </ul>
+                        
+                        <button onclick="loadCampaigns()" class="mt-4 w-full bg-red-500/20 border border-red-500 text-red-400 py-2.5 rounded-lg font-medium hover:bg-red-500/30 transition">
+                            <i class="fa-solid fa-rotate-right mr-2"></i>Retry
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Show Supabase error UI
+        function showSupabaseError(message) {
+            const grid = document.getElementById('deals-grid');
+            const countEl = document.getElementById('deal-count');
+            countEl.textContent = 'Error';
+            
+            grid.innerHTML = `
+                <div class="col-span-full">
+                    <div class="bg-orange-900/30 border-2 border-orange-500 rounded-xl p-5">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span class="text-2xl">⚠️</span>
+                            <h3 class="text-orange-400 font-bold text-lg">Database Connection Error</h3>
+                        </div>
+                        
+                        <div class="bg-gray-900 rounded-lg p-3 mb-4">
+                            <p class="text-orange-300 text-sm font-mono break-all">${message}</p>
+                        </div>
+                        
+                        <p class="text-gray-300 text-sm font-semibold mb-2">Troubleshooting Steps:</p>
+                        <ul class="space-y-2 text-sm text-gray-400">
+                            <li class="flex items-start gap-2">
+                                <span class="text-orange-400">1.</span>
+                                <span>Verify <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">SUPABASE_URL</code> in Cloudflare Dashboard > Settings > Environment Variables</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-orange-400">2.</span>
+                                <span>Verify <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">SUPABASE_KEY</code> is the service_role key (not anon key)</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-orange-400">3.</span>
+                                <span>Check Supabase project is not paused (free tier pauses after inactivity)</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="text-orange-400">4.</span>
+                                <span>Verify <code class="bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">campaigns</code> table exists in Supabase Table Editor</span>
+                            </li>
+                        </ul>
+                        
+                        <button onclick="loadCampaigns()" class="mt-4 w-full bg-orange-500/20 border border-orange-500 text-orange-400 py-2.5 rounded-lg font-medium hover:bg-orange-500/30 transition">
+                            <i class="fa-solid fa-rotate-right mr-2"></i>Retry
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Main fetch function
+        async function loadCampaigns() {
+            renderSkeletons();
+            
+            let response, rawText, data;
+
+            try {
+                response = await fetch('/api/campaigns', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                rawText = await response.text();
+                console.log('[Campaigns] Status:', response.status);
+                console.log('[Campaigns] Raw:', rawText.substring(0, 200));
+            } catch (networkErr) {
+                console.error('[Campaigns] Network error:', networkErr);
+                showRoutingError('NETWORK_FAIL', networkErr.message);
+                return;
+            }
+
+            try {
+                data = JSON.parse(rawText);
+            } catch (parseErr) {
+                console.error('[Campaigns] Parse error:', parseErr);
+                showRoutingError(response.status, rawText);
+                return;
+            }
+
+            if (!Array.isArray(data)) {
+                console.error('[Campaigns] Not an array:', data);
+                showRoutingError('NON_ARRAY', JSON.stringify(data));
+                return;
+            }
+
+            if (data.length > 0 && data[0].is_error === true) {
+                console.error('[Campaigns] Backend error:', data[0].message);
+                showSupabaseError(data[0].message);
+                return;
+            }
+
+            allCampaigns = data;
+            renderDeals(data);
+        }
+
+        // Perform search
+        async function performSearch() {
+            const input = document.getElementById('search-input');
+            const q = input.value.trim();
+            
+            if (!q) {
+                renderDeals(allCampaigns);
+                document.getElementById('search-dropdown').classList.add('hidden');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/search?q=' + encodeURIComponent(q), {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                const results = await res.json();
+                
+                if (Array.isArray(results)) {
+                    if (results.length > 0 && results[0].is_error) {
+                        // Search error - just show all deals
+                        renderDeals(allCampaigns);
+                    } else {
+                        renderDeals(results);
+                    }
+                }
+            } catch (e) {
+                console.error('[Search] Error:', e);
+                renderDeals(allCampaigns);
+            }
+        }
+
+        // Search with debounce
+        let searchTimer;
+        document.getElementById('search-input').addEventListener('keyup', function() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                const q = this.value.trim();
+                if (!q) {
+                    renderDeals(allCampaigns);
+                    return;
+                }
+                performSearch();
+            }, 400);
+        });
+
+        // Boot
+        window.addEventListener('DOMContentLoaded', loadCampaigns);
+    </script>
+</body>
+</html>
