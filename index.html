@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LuckMetric - Compare & Earn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .error-box { background: #fee2e2; border: 2px solid #ef4444; color: #991b1b; padding: 16px; border-radius: 12px; margin: 10px 0; }
+        .error-box h3 { font-weight: bold; margin-bottom: 8px; }
+        .error-box code { background: #fff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+        .success-box { background: #dcfce7; border: 2px solid #22c55e; color: #166534; padding: 16px; border-radius: 12px; margin: 10px 0; }
+    </style>
+</head>
+<body class="pb-10">
+
+    <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-b-3xl shadow-lg text-center">
+        <h1 class="text-3xl font-extrabold mb-1"><i class="fa-solid fa-bolt"></i> LuckMetric</h1>
+        <p class="text-sm opacity-90 mb-4">Global Search & Price Compare</p>
+        
+        <div class="relative max-w-md mx-auto text-gray-800 shadow-xl rounded-xl">
+            <input type="text" id="searchInput" placeholder="Search 'iPhone 16' or Paste Link..." class="w-full p-4 rounded-xl outline-none pr-12 font-medium">
+            <button onclick="handleSearch()" class="absolute right-2 top-2 bg-gray-900 text-white p-2 rounded-lg hover:bg-gray-800 transition">
+                <i class="fa-solid fa-search"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Health Check Status -->
+    <div id="healthStatus" class="max-w-md mx-auto mt-4 px-4">
+        <div class="text-center py-4">
+            <div class="loader mx-auto scale-100"></div>
+            <p class="text-xs text-gray-500 mt-2">Checking Cloudflare Functions...</p>
+        </div>
+    </div>
+
+    <div id="searchSection" class="max-w-md mx-auto mt-6 px-4 hidden transition-all duration-300">
+        <div class="flex justify-between items-center mb-3 border-b pb-2">
+            <h2 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-tags text-orange-500"></i> Compare Prices</h2>
+            <button onclick="closeSearch()" class="text-sm text-red-500 font-bold bg-red-50 px-3 py-1 rounded-full"><i class="fa-solid fa-times"></i> Close</button>
+        </div>
+        <div id="loadingUI" class="flex flex-col items-center justify-center py-12 hidden">
+            <div class="loader mb-3 scale-150"></div>
+            <p class="text-xs text-gray-500 font-medium animate-pulse">Searching global platforms safely...</p>
+        </div>
+        <div id="searchResults" class="space-y-4 mt-2"></div>
+    </div>
+
+    <div id="homeSection" class="max-w-md mx-auto mt-6 px-4 hidden">
+        <h2 class="text-lg font-bold text-gray-800 mb-3"><i class="fa-solid fa-fire text-orange-500"></i> Top Live Deals</h2>
+        <div id="campaignsList" class="space-y-4">
+            <div class="text-center text-gray-400 py-10"><div class="loader mx-auto scale-150"></div></div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== HEALTH CHECK FIRST ====================
+        async function checkHealth() {
+            const healthDiv = document.getElementById('healthStatus');
+            const homeSection = document.getElementById('homeSection');
+            
+            try {
+                console.log('Testing /api/health...');
+                const res = await fetch('/api/health', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                console.log('Health check status:', res.status);
+                
+                if (res.status === 404) {
+                    healthDiv.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> ROUTING CRITICAL ERROR</h3>
+                            <p class="text-sm mb-2">Cloudflare Functions are NOT active.</p>
+                            <p class="text-xs">Status: <code>404 Not Found</code></p>
+                            <p class="text-xs mt-2"><strong>Fix:</strong> Check your GitHub folder name. It MUST be exactly <code>functions</code> (plural, lowercase) at the root level.</p>
+                            <p class="text-xs mt-1">Expected path: <code>/functions/api/health.js</code></p>
+                        </div>`;
+                    homeSection.classList.add('hidden');
+                    return false;
+                }
+                
+                const text = await res.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    healthDiv.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-bug"></i> HEALTH CHECK PARSE ERROR</h3>
+                            <p class="text-xs">Response was not valid JSON:</p>
+                            <code class="block mt-2 bg-white p-2 rounded">${text.substring(0, 200)}</code>
+                        </div>`;
+                    homeSection.classList.add('hidden');
+                    return false;
+                }
+                
+                if (data.status === 'ok') {
+                    healthDiv.innerHTML = `
+                        <div class="success-box">
+                            <h3><i class="fa-solid fa-check-circle"></i> Cloudflare Functions Active</h3>
+                            <p class="text-sm">${data.message}</p>
+                        </div>`;
+                    
+                    // Hide health status after 2 seconds and show campaigns
+                    setTimeout(() => {
+                        healthDiv.classList.add('hidden');
+                        homeSection.classList.remove('hidden');
+                        loadCampaigns();
+                    }, 1500);
+                    return true;
+                } else {
+                    healthDiv.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-exclamation-circle"></i> Health Check Failed</h3>
+                            <p class="text-xs">Unexpected response: ${JSON.stringify(data)}</p>
+                        </div>`;
+                    return false;
+                }
+                
+            } catch (e) {
+                healthDiv.innerHTML = `
+                    <div class="error-box">
+                        <h3><i class="fa-solid fa-network-wired"></i> Network Error</h3>
+                        <p class="text-sm">Could not connect to /api/health</p>
+                        <p class="text-xs">Error: ${e.message}</p>
+                    </div>`;
+                homeSection.classList.add('hidden');
+                return false;
+            }
+        }
+
+        // ==================== LOAD CAMPAIGNS ====================
+        async function loadCampaigns() {
+            const container = document.getElementById('campaignsList');
+            container.innerHTML = '<div class="text-center py-4"><div class="loader mx-auto"></div><p class="text-xs text-gray-500 mt-2">Loading campaigns...</p></div>';
+            
+            try {
+                const res = await fetch('/api/campaigns', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                console.log('Campaigns status:', res.status);
+                
+                if (res.status === 404) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> ROUTING ERROR: /api/campaigns</h3>
+                            <p class="text-sm">Cloudflare cannot find the function file.</p>
+                            <p class="text-xs mt-2">Expected file: <code>functions/api/campaigns.js</code></p>
+                            <p class="text-xs mt-1">Check that your GitHub repo has the correct folder structure.</p>
+                        </div>`;
+                    return;
+                }
+                
+                const text = await res.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-bug"></i> JSON Parse Error</h3>
+                            <p class="text-xs">Could not parse response:</p>
+                            <code class="block mt-2 bg-white p-2 rounded text-xs">${text.substring(0, 300)}</code>
+                        </div>`;
+                    return;
+                }
+                
+                if (data.error) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-server"></i> Backend Error</h3>
+                            <p class="text-sm">${data.error}</p>
+                        </div>`;
+                    return;
+                }
+                
+                if (!Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = '<p class="text-center text-gray-500 text-sm py-8">No campaigns found.</p>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                data.forEach(deal => {
+                    let plat = deal.platform ? deal.platform.toLowerCase() : 'unknown';
+                    let platColor = plat.includes('amazon') ? 'bg-amber-500' : plat.includes('flipkart') ? 'bg-blue-600' : 'bg-rose-500';
+                    
+                    container.innerHTML += `
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col hover:shadow-md transition duration-200">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="${platColor} text-white text-[10px] font-bold px-2.5 py-1 rounded uppercase tracking-wider">${deal.platform || 'DEAL'}</span>
+                                <span class="bg-green-100 text-green-700 text-[10px] font-bold px-2.5 py-1 rounded uppercase">${deal.user_luck_coins_text || 'Variable %'}</span>
+                            </div>
+                            <h3 class="text-sm font-bold text-gray-800 mb-3 leading-snug line-clamp-2">${deal.title}</h3>
+                            <a href="/go?plat=${plat}&url=${encodeURIComponent(deal.original_link)}" target="_blank" class="w-full text-center bg-gray-900 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-orange-500 transition duration-300">Grab Deal <i class="fa-solid fa-arrow-up-right-from-square ml-1 text-xs"></i></a>
+                        </div>
+                    `;
+                });
+                
+            } catch (e) {
+                container.innerHTML = `
+                    <div class="error-box">
+                        <h3><i class="fa-solid fa-network-wired"></i> Network Error</h3>
+                        <p class="text-sm">Failed to load campaigns</p>
+                        <p class="text-xs">${e.message}</p>
+                    </div>`;
+            }
+        }
+
+        // ==================== SEARCH ====================
+        async function handleSearch() {
+            let query = document.getElementById('searchInput').value.trim();
+            if(!query) return;
+
+            if(query.startsWith('http')) {
+                try {
+                    let urlObj = new URL(query);
+                    let slug = urlObj.pathname.split('/').filter(x => x.length > 3)[0] || "";
+                    query = slug.replace(/[-_]/g, ' ') || query;
+                } catch(e) {}
+            }
+
+            document.getElementById('homeSection').classList.add('hidden');
+            document.getElementById('searchSection').classList.remove('hidden');
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('loadingUI').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                
+                if (res.status === 404) {
+                    document.getElementById('loadingUI').classList.add('hidden');
+                    document.getElementById('searchResults').innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> /api/search Not Found (404)</h3>
+                            <p class="text-sm">Check that <code>functions/api/search.js</code> exists.</p>
+                        </div>`;
+                    return;
+                }
+                
+                const data = await res.json();
+                document.getElementById('loadingUI').classList.add('hidden');
+
+                if(data.status === 'success') {
+                    let resultsHTML = '';
+                    for (const [platform, details] of Object.entries(data.platforms)) {
+                        let platColor = platform.includes('amazon') ? 'bg-amber-500' : platform.includes('flipkart') ? 'bg-blue-600' : 'bg-gray-800';
+                        resultsHTML += `
+                            <div class="bg-white p-4 flex justify-between items-center rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
+                                <div>
+                                    <div class="${platColor} inline-block text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide mb-1">${platform}</div>
+                                    <div class="font-extrabold text-gray-900 text-xl">₹${details.price.toLocaleString('en-IN')}</div>
+                                </div>
+                                <a href="/go?plat=${platform}&url=${encodeURIComponent(details.link)}" target="_blank" class="bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow hover:bg-orange-600 active:scale-95 transition">Buy Now</a>
+                            </div>
+                        `;
+                    }
+                    document.getElementById('searchResults').innerHTML = resultsHTML;
+                } else {
+                    document.getElementById('searchResults').innerHTML = `<p class="text-center text-gray-500 text-sm mt-8 font-medium">No exact match found or blocked by platform.</p>`;
+                }
+            } catch(e) {
+                document.getElementById('loadingUI').classList.add('hidden');
+                document.getElementById('searchResults').innerHTML = `<p class="text-center text-red-500 text-sm mt-8 font-medium">Network error. Try again.</p>`;
+            }
+        }
+
+        function closeSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchSection').classList.add('hidden');
+            document.getElementById('homeSection').classList.remove('hidden');
+        }
+
+        // Start with health check
+        window.onload = checkHealth;
+    </script>
+</body>
+</html>
