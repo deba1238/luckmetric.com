@@ -1,0 +1,1186 @@
+<!--
+================================================================================
+LUCKMETRIC DEPLOYMENT CHECKLIST:
+[ ] 1. GitHub repo root contains: index.html, _routes.json, functions/
+[ ] 2. functions/ directory has: go.js AND api/ subfolder
+[ ] 3. api/ contains: health.js, campaigns.js, search.js, go-link.js
+[ ] 4. NO wrangler.toml exists anywhere in the repo
+[ ] 5. Cloudflare Pages project connected to this GitHub repo
+[ ] 6. In Cloudflare Dashboard > Pages > Project > Settings >
+        Environment Variables:
+        SUPABASE_URL = https://xxxx.supabase.co
+        SUPABASE_KEY = your-service-role-key (NOT anon key)
+[ ] 7. Build settings: Framework = None, Build command = (empty),
+        Output directory = / (forward slash only)
+[ ] 8. Visit /api/health first to verify functions are working
+[ ] 9. Open browser DevTools Console while loading — check for errors
+[ ] 10. Supabase: Confirm campaigns table has at least 1 row of data
+================================================================================
+-->
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#111827" />
+  <meta name="description" content="LuckMetric — Global Price Comparison & Cashback Engine. Earn Luck Coins on every purchase." />
+  <title>LuckMetric — Earn While You Shop</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js for price history -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              orange: '#F97316',
+              orangeHover: '#EA580C',
+              dark: '#111827',
+              card: '#1F2937',
+              border: '#374151',
+              muted: '#9CA3AF',
+              footer: '#0F172A',
+            }
+          },
+          fontFamily: {
+            display: ['Syne', 'sans-serif'],
+            body: ['DM Sans', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background-color: #111827;
+      color: #F9FAFB;
+      font-size: 14px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    h1, h2, h3, .font-display { font-family: 'Syne', sans-serif; }
+
+    /* ── Marquee ── */
+    .marquee-wrapper { overflow: hidden; white-space: nowrap; }
+    .marquee-track {
+      display: inline-block;
+      animation: marquee 28s linear infinite;
+    }
+    .marquee-track:hover { animation-play-state: paused; }
+    @keyframes marquee {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* ── Skeleton pulse ── */
+    @keyframes pulse-bg {
+      0%, 100% { background-color: #1F2937; }
+      50%       { background-color: #374151; }
+    }
+    .skeleton { animation: pulse-bg 1.6s ease-in-out infinite; border-radius: 8px; }
+
+    /* ── Card hover ── */
+    .deal-card {
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+    .deal-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(249, 115, 22, 0.18);
+    }
+    .grab-btn {
+      transition: background-color 0.15s ease, transform 0.12s ease;
+    }
+    .grab-btn:active { transform: scale(0.97); }
+    .grab-btn:hover  { background-color: #EA580C; transform: scale(1.02); }
+
+    /* ── Stats counter ── */
+    .stat-card {
+      background: linear-gradient(135deg, #1F2937 0%, #111827 100%);
+      border: 1px solid #374151;
+    }
+
+    /* ── Search focus glow ── */
+    #search-input:focus {
+      outline: none;
+      border-color: #F97316;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2);
+    }
+
+    /* ── Platform badge colors ── */
+    .badge-amazon  { background-color: #FF9900; color: #000; }
+    .badge-flipkart{ background-color: #2874F0; color: #fff; }
+    .badge-myntra  { background-color: #FF3F6C; color: #fff; }
+    .badge-meesho  { background-color: #9B59B6; color: #fff; }
+    .badge-ajio    { background-color: #E9C46A; color: #000; }
+    .badge-nykaa   { background-color: #FC2779; color: #fff; }
+    .badge-tata    { background-color: #005DAA; color: #fff; }
+    .badge-default { background-color: #4B5563; color: #fff; }
+
+    /* ── Cashback badge ── */
+    .cashback-pill {
+      background: linear-gradient(90deg, #F97316, #EA580C);
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      color: #fff;
+    }
+
+    /* ── Price chart container ── */
+    .chart-container { position: relative; height: 140px; width: 100%; }
+
+    /* ── Coin shimmer ── */
+    @keyframes coinGlow {
+      0%, 100% { text-shadow: 0 0 6px rgba(249,115,22,0.4); }
+      50%       { text-shadow: 0 0 14px rgba(249,115,22,0.9); }
+    }
+    .coin-text { animation: coinGlow 2.4s ease-in-out infinite; }
+
+    /* ── Fade in ── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeInUp 0.45s ease both; }
+
+    /* ── 90-day cashback banner ── */
+    .cashback-ribbon {
+      background: linear-gradient(90deg, #1a1a2e, #16213e, #0f3460);
+      border-left: 4px solid #F97316;
+    }
+
+    /* ── How it works step ── */
+    .step-num {
+      background: linear-gradient(135deg, #F97316, #EA580C);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-family: 'Syne', sans-serif;
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    /* ── Platform pill hover ── */
+    .platform-pill {
+      transition: box-shadow 0.2s, transform 0.15s;
+    }
+    .platform-pill:hover {
+      box-shadow: 0 0 0 2px #F97316;
+      transform: translateY(-1px);
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+
+    /* ── Price comparison row ── */
+    .price-row { border-left: 3px solid #374151; }
+    .price-row.cheapest { border-left-color: #22C55E; background: rgba(34,197,94,0.07); }
+
+    /* ── Trend arrows ── */
+    .trend-drop  { color: #22C55E; }
+    .trend-rise  { color: #EF4444; }
+    .trend-stable{ color: #9CA3AF; }
+  </style>
+</head>
+
+<body class="min-h-screen bg-gray-900 text-gray-50">
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 1 — STICKY HEADER
+══════════════════════════════════════════════════════════════════════════ -->
+<header id="main-header" style="position:sticky;top:0;z-index:50;background:#111827;border-bottom:1px solid #374151;">
+  <div class="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
+    <!-- Logo -->
+    <a href="/" class="flex items-center gap-2 font-display font-800 text-xl" style="color:#F97316;text-decoration:none;">
+      <span style="font-size:1.4rem;">🍀</span>
+      <span style="font-family:'Syne',sans-serif;font-weight:800;letter-spacing:-0.5px;">LuckMetric</span>
+    </a>
+
+    <!-- Auth buttons -->
+    <div class="flex items-center gap-2">
+      <button
+        onclick="showModal('login')"
+        class="px-3 py-2 rounded-lg text-sm font-semibold"
+        style="border:1px solid #374151;color:#F9FAFB;background:transparent;min-height:36px;"
+      >Login</button>
+      <button
+        onclick="showModal('signup')"
+        class="px-3 py-2 rounded-lg text-sm font-semibold"
+        style="background:#F97316;color:#fff;min-height:36px;"
+      >Sign Up</button>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 2 — HERO MARQUEE STRIP
+══════════════════════════════════════════════════════════════════════════ -->
+<div style="background:linear-gradient(90deg,#EA580C,#F97316,#EA580C);padding:7px 0;overflow:hidden;">
+  <div class="marquee-wrapper">
+    <div class="marquee-track text-white font-semibold" style="font-size:12.5px;letter-spacing:0.3px;">
+      &nbsp;🔥 New Deals Added &nbsp;·&nbsp; Earn Luck Coins on Every Purchase &nbsp;·&nbsp; 🎯 Price Drop Alerts Now Live &nbsp;·&nbsp; 💸 Cashback Up to 30% &nbsp;·&nbsp; 🕐 90-Day Cashback in Crypto &nbsp;·&nbsp; Refer &amp; Earn Bonus Coins &nbsp;·&nbsp; 🛒 10,000+ Deals Tracked Daily &nbsp;·&nbsp;
+      🔥 New Deals Added &nbsp;·&nbsp; Earn Luck Coins on Every Purchase &nbsp;·&nbsp; 🎯 Price Drop Alerts Now Live &nbsp;·&nbsp; 💸 Cashback Up to 30% &nbsp;·&nbsp; 🕐 90-Day Cashback in Crypto &nbsp;·&nbsp; Refer &amp; Earn Bonus Coins &nbsp;·&nbsp; 🛒 10,000+ Deals Tracked Daily &nbsp;·&nbsp;
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     CASHBACK INFO RIBBON
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="max-w-lg mx-auto px-4 mt-3">
+  <div class="cashback-ribbon rounded-xl p-3 flex items-center gap-3">
+    <div style="font-size:1.6rem;flex-shrink:0;">⏳</div>
+    <div>
+      <div class="font-semibold text-white" style="font-size:13px;">90-Day Cashback Guarantee</div>
+      <div style="font-size:11.5px;color:#9CA3AF;margin-top:1px;">
+        Your Luck Coins are credited after 90 days. Withdraw as Crypto (USDT/BTC) anytime after approval.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 3 — SEARCH BAR
+══════════════════════════════════════════════════════════════════════════ -->
+<section class="max-w-lg mx-auto px-4 mt-4">
+  <div style="position:relative;">
+    <div class="flex gap-2">
+      <!-- Input -->
+      <div style="position:relative;flex:1;">
+        <i class="fa fa-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#9CA3AF;font-size:14px;pointer-events:none;"></i>
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Search products, paste Amazon/Flipkart link..."
+          autocomplete="off"
+          style="
+            width:100%;
+            padding:12px 12px 12px 36px;
+            background:#1F2937;
+            border:1.5px solid #374151;
+            border-radius:12px;
+            color:#F9FAFB;
+            font-size:14px;
+            font-family:'DM Sans',sans-serif;
+            min-height:48px;
+            transition:border-color 0.2s,box-shadow 0.2s;
+          "
+        />
+      </div>
+      <!-- Search Button -->
+      <button
+        onclick="triggerSearch()"
+        style="
+          background:#F97316;
+          color:#fff;
+          border:none;
+          border-radius:12px;
+          padding:0 18px;
+          font-weight:700;
+          font-size:14px;
+          min-height:48px;
+          cursor:pointer;
+          white-space:nowrap;
+          flex-shrink:0;
+          font-family:'DM Sans',sans-serif;
+          transition:background 0.15s;
+        "
+      >
+        <i class="fa fa-search mr-1"></i> Search
+      </button>
+    </div>
+
+    <!-- Search mode hint -->
+    <div id="search-hint" style="font-size:11px;color:#6B7280;margin-top:5px;padding-left:4px;">
+      💡 Tip: Paste an Amazon or Flipkart link to see price history & comparison
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 4 — STATS BAR
+══════════════════════════════════════════════════════════════════════════ -->
+<section class="max-w-lg mx-auto px-4 mt-4">
+  <div class="grid grid-cols-3 gap-2">
+    <div class="stat-card rounded-xl p-3 text-center">
+      <div style="font-size:1.3rem;">🛒</div>
+      <div class="font-display font-bold text-white" style="font-size:13px;margin-top:3px;">10,000+</div>
+      <div style="font-size:10px;color:#9CA3AF;">Deals Tracked</div>
+    </div>
+    <div class="stat-card rounded-xl p-3 text-center">
+      <div style="font-size:1.3rem;">💰</div>
+      <div class="font-display font-bold text-white" style="font-size:13px;margin-top:3px;">₹4.2Cr+</div>
+      <div style="font-size:10px;color:#9CA3AF;">Cashback Given</div>
+    </div>
+    <div class="stat-card rounded-xl p-3 text-center">
+      <div style="font-size:1.3rem;">👥</div>
+      <div class="font-display font-bold text-white" style="font-size:13px;margin-top:3px;">50,000+</div>
+      <div style="font-size:10px;color:#9CA3AF;">Active Users</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 5 — LIVE DEALS GRID
+══════════════════════════════════════════════════════════════════════════ -->
+<section class="max-w-lg mx-auto px-4 mt-5 mb-2">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="font-display font-bold text-white" style="font-size:1.1rem;letter-spacing:-0.3px;">
+      🔥 Top Live Deals
+    </h2>
+    <span id="deals-count" style="font-size:11px;color:#9CA3AF;"></span>
+  </div>
+  <div id="deals-grid"></div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 6 — HOW IT WORKS
+══════════════════════════════════════════════════════════════════════════ -->
+<section class="max-w-lg mx-auto px-4 mt-8 mb-2">
+  <h2 class="font-display font-bold text-white text-center mb-4" style="font-size:1.15rem;letter-spacing:-0.3px;">
+    How LuckMetric Works
+  </h2>
+  <div class="grid grid-cols-1 gap-3">
+    <!-- Step 1 -->
+    <div style="background:#1F2937;border:1px solid #374151;border-radius:16px;padding:16px;display:flex;align-items:flex-start;gap:14px;">
+      <div class="step-num">01</div>
+      <div>
+        <div class="font-display font-bold text-white" style="font-size:15px;">🔍 Browse or Search</div>
+        <div style="font-size:13px;color:#9CA3AF;margin-top:4px;line-height:1.5;">
+          Browse curated deals or paste any product link. We compare prices across Amazon, Flipkart, Myntra and more — instantly.
+        </div>
+      </div>
+    </div>
+    <!-- Step 2 -->
+    <div style="background:#1F2937;border:1px solid #374151;border-radius:16px;padding:16px;display:flex;align-items:flex-start;gap:14px;">
+      <div class="step-num">02</div>
+      <div>
+        <div class="font-display font-bold text-white" style="font-size:15px;">🛒 Shop &amp; Earn Coins</div>
+        <div style="font-size:13px;color:#9CA3AF;margin-top:4px;line-height:1.5;">
+          Click "Grab Deal" to shop through our tracked link. You automatically earn Luck Coins on every verified purchase.
+        </div>
+      </div>
+    </div>
+    <!-- Step 3 -->
+    <div style="background:#1F2937;border:1px solid #374151;border-radius:16px;padding:16px;display:flex;align-items:flex-start;gap:14px;">
+      <div class="step-num">03</div>
+      <div>
+        <div class="font-display font-bold text-white" style="font-size:15px;">💸 Withdraw in 90 Days</div>
+        <div style="font-size:13px;color:#9CA3AF;margin-top:4px;line-height:1.5;">
+          After 90 days (return period clears), your cashback is approved. Withdraw as USDT, BTC, or other crypto directly to your wallet.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 7 — PLATFORM TRUST BADGES
+══════════════════════════════════════════════════════════════════════════ -->
+<section class="max-w-lg mx-auto px-4 mt-6 mb-2">
+  <div style="font-size:11px;color:#9CA3AF;text-align:center;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">
+    Deals from 7+ Platforms
+  </div>
+  <div class="flex flex-wrap justify-center gap-2">
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#FF9900;">Amazon</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#2874F0;">Flipkart</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#FF3F6C;">Myntra</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#9B59B6;">Meesho</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#E9C46A;">AJIO</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#FC2779;">Nykaa</div>
+    <div class="platform-pill" style="background:#2a2a2a;border:1px solid #374151;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:600;color:#005DAA;">Tata CLiQ</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 8 — FOOTER
+══════════════════════════════════════════════════════════════════════════ -->
+<footer style="background:#0F172A;border-top:1px solid #1E293B;margin-top:32px;padding:28px 16px 24px;">
+  <div class="max-w-lg mx-auto">
+    <!-- Logo + tagline -->
+    <div style="text-align:center;margin-bottom:14px;">
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;color:#F97316;">🍀 LuckMetric</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px;">Earn while you shop. Powered by LuckMetric.</div>
+    </div>
+
+    <!-- Links -->
+    <div class="flex flex-wrap justify-center gap-4 mb-4">
+      <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">About</a>
+      <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">Privacy Policy</a>
+      <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">Terms</a>
+      <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">Contact</a>
+      <a href="#" style="font-size:12px;color:#9CA3AF;text-decoration:none;">API Status</a>
+    </div>
+
+    <!-- Social -->
+    <div class="flex justify-center gap-5 mb-4">
+      <a href="#" style="color:#9CA3AF;font-size:1.2rem;"><i class="fab fa-telegram"></i></a>
+      <a href="#" style="color:#9CA3AF;font-size:1.2rem;"><i class="fab fa-instagram"></i></a>
+      <a href="#" style="color:#9CA3AF;font-size:1.2rem;"><i class="fab fa-twitter"></i></a>
+    </div>
+
+    <!-- Copyright -->
+    <div style="text-align:center;font-size:11px;color:#4B5563;">
+      © 2025 LuckMetric. All rights reserved. · Cashback credited after 90-day return period.
+    </div>
+  </div>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     AUTH MODAL (Login / Sign Up)
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="auth-modal" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center;">
+  <div style="background:#1F2937;border-radius:20px 20px 0 0;width:100%;max-width:420px;padding:24px;border-top:2px solid #F97316;">
+    <div class="flex justify-between items-center mb-5">
+      <h3 id="modal-title" class="font-display font-bold text-white" style="font-size:1.1rem;">Login</h3>
+      <button onclick="closeModal()" style="color:#9CA3AF;background:none;border:none;font-size:1.3rem;cursor:pointer;"><i class="fa fa-times"></i></button>
+    </div>
+    <div id="modal-body">
+      <input type="email" id="auth-email" placeholder="Email address" style="width:100%;padding:12px 14px;background:#111827;border:1.5px solid #374151;border-radius:10px;color:#F9FAFB;font-size:14px;margin-bottom:10px;font-family:'DM Sans',sans-serif;" />
+      <input type="password" id="auth-password" placeholder="Password" style="width:100%;padding:12px 14px;background:#111827;border:1.5px solid #374151;border-radius:10px;color:#F9FAFB;font-size:14px;margin-bottom:14px;font-family:'DM Sans',sans-serif;" />
+      <button onclick="handleAuth()" style="width:100%;background:#F97316;color:#fff;border:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;cursor:pointer;font-family:'DM Sans',sans-serif;">
+        Continue
+      </button>
+      <div id="auth-error" style="color:#EF4444;font-size:12px;text-align:center;margin-top:8px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PRICE HISTORY MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="history-modal" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.8);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center;">
+  <div style="background:#1F2937;border-radius:20px 20px 0 0;width:100%;max-width:420px;padding:20px;border-top:2px solid #F97316;max-height:90vh;overflow-y:auto;">
+    <div class="flex justify-between items-center mb-4">
+      <h3 id="history-title" class="font-display font-bold text-white" style="font-size:1rem;">Price History</h3>
+      <button onclick="closeHistoryModal()" style="color:#9CA3AF;background:none;border:none;font-size:1.3rem;cursor:pointer;"><i class="fa fa-times"></i></button>
+    </div>
+    <div id="history-modal-body"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT ENGINE
+══════════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Global state ──────────────────────────────────────────────────────────
+let allCampaigns = [];
+let searchTimer = null;
+let activeCharts = {};
+
+// ── Platform config ────────────────────────────────────────────────────────
+const PLATFORM_CONFIG = {
+  amazon:   { class: 'badge-amazon',   label: 'Amazon',   icon: '🛒' },
+  flipkart: { class: 'badge-flipkart', label: 'Flipkart', icon: '🔵' },
+  myntra:   { class: 'badge-myntra',   label: 'Myntra',   icon: '👗' },
+  meesho:   { class: 'badge-meesho',   label: 'Meesho',   icon: '🛍️' },
+  ajio:     { class: 'badge-ajio',     label: 'AJIO',     icon: '👟' },
+  nykaa:    { class: 'badge-nykaa',    label: 'Nykaa',    icon: '💄' },
+  tata:     { class: 'badge-tata',     label: 'Tata CLiQ',icon: '🏷️' },
+};
+
+function getPlatformConfig(platform) {
+  if (!platform) return { class: 'badge-default', label: 'Deal', icon: '🏷️' };
+  const key = platform.toLowerCase().replace(/\s+/g, '');
+  return PLATFORM_CONFIG[key] || { class: 'badge-default', label: platform, icon: '🏷️' };
+}
+
+// ── Expiry countdown ───────────────────────────────────────────────────────
+function getExpiryHtml(expiry_date) {
+  if (!expiry_date) return '';
+  const diff = new Date(expiry_date) - new Date();
+  if (diff <= 0) return '<span style="color:#EF4444;font-size:11px;">⛔ Expired</span>';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `<span style="color:#F59E0B;font-size:11px;">⏱ ${d}d ${h % 24}h left</span>`;
+  return `<span style="color:#F59E0B;font-size:11px;">⏱ ${h}h ${m}m left</span>`;
+}
+
+// ── Price metadata badges ──────────────────────────────────────────────────
+function getMetaBadges(meta) {
+  if (!meta) return '';
+  let html = '';
+  if (meta.is_lowest_now) {
+    html += '<span style="background:#15803D;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-left:4px;">🏆 Lowest Price</span>';
+  }
+  if (meta.trend === 'dropping') {
+    html += '<span style="background:#1D4ED8;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-left:4px;">📉 Price Dropping</span>';
+  } else if (meta.trend === 'rising') {
+    html += '<span style="background:#92400E;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;margin-left:4px;">📈 Price Rising</span>';
+  }
+  return html;
+}
+
+// ── Render skeleton loaders ────────────────────────────────────────────────
+function renderSkeletons(count = 6) {
+  const grid = document.getElementById('deals-grid');
+  let html = '<div class="grid grid-cols-1 gap-3" style="gap:12px;">';
+  for (let i = 0; i < count; i++) {
+    html += `
+      <div style="background:#1F2937;border-radius:16px;padding:16px;border:1px solid #374151;">
+        <div class="flex gap-2 mb-3">
+          <div class="skeleton" style="width:60px;height:20px;"></div>
+          <div class="skeleton" style="width:50px;height:20px;"></div>
+        </div>
+        <div class="skeleton" style="height:18px;width:90%;margin-bottom:8px;"></div>
+        <div class="skeleton" style="height:14px;width:60%;margin-bottom:14px;"></div>
+        <div class="skeleton" style="height:42px;width:100%;border-radius:10px;" style="background:#F97316;opacity:0.3;"></div>
+      </div>`;
+  }
+  html += '</div>';
+  grid.innerHTML = html;
+}
+
+// ── Render a single deal card ──────────────────────────────────────────────
+function renderCard(deal, index) {
+  const plat = getPlatformConfig(deal.platform);
+  const expiry = getExpiryHtml(deal.expiry_date);
+  const metaBadges = getMetaBadges(deal.metadata);
+  const isManual = deal.source_type === 'Manual';
+  const hasPriceHistory = deal.price_history && deal.price_history.length > 0;
+  const cardId = `card-${deal.id || index}`;
+
+  const safeTitle = (deal.title || 'Untitled Deal')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeCoins = (deal.user_luck_coins_text || '')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safePlatform = (deal.platform || '')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeUrl = encodeURIComponent(deal.original_link || '#');
+  const safePlat = encodeURIComponent((deal.platform || 'unknown').toLowerCase());
+
+  return `
+    <div class="deal-card fade-in" id="${cardId}" style="
+      background:#1F2937;
+      border:1px solid #374151;
+      border-radius:16px;
+      padding:15px;
+      animation-delay:${index * 0.06}s;
+    ">
+      <!-- Top row: badges -->
+      <div class="flex flex-wrap items-center gap-1 mb-2">
+        <span class="${plat.class}" style="font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;">
+          ${plat.icon} ${safePlatform || plat.label}
+        </span>
+        ${isManual
+          ? '<span style="background:#15803D;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;">✓ Curated</span>'
+          : '<span style="background:#374151;color:#D1D5DB;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;">⚡ Live</span>'
+        }
+        ${metaBadges}
+        ${expiry ? `<span style="margin-left:auto;">${expiry}</span>` : ''}
+      </div>
+
+      <!-- Deal title -->
+      <div class="font-display font-bold text-white mb-2" style="
+        font-size:14.5px;
+        line-height:1.4;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+      ">${safeTitle}</div>
+
+      <!-- Coins -->
+      ${safeCoins ? `
+        <div class="flex items-center gap-1 mb-3">
+          <span class="coin-text" style="font-size:1rem;">🪙</span>
+          <span style="color:#F97316;font-weight:700;font-size:13px;">${safeCoins}</span>
+          <span style="color:#6B7280;font-size:11px;margin-left:4px;">· 90-day cashback</span>
+        </div>
+      ` : '<div style="height:8px;"></div>'}
+
+      <!-- Price history mini preview -->
+      ${hasPriceHistory ? `
+        <div style="margin-bottom:10px;">
+          <div class="flex items-center gap-2 mb-1">
+            <span style="font-size:10px;color:#9CA3AF;">📈 30-day price trend</span>
+            ${deal.metadata && deal.metadata.lowest_ever ? `
+              <span style="font-size:10px;color:#22C55E;">Low: ₹${Number(deal.metadata.lowest_ever).toLocaleString('en-IN')}</span>
+            ` : ''}
+          </div>
+          <div class="chart-container">
+            <canvas id="chart-${cardId}"></canvas>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Buttons -->
+      <div class="flex gap-2">
+        <button
+          class="grab-btn"
+          onclick="handleGrabDeal('${safePlat}','${safeUrl}')"
+          style="
+            flex:1;
+            background:#F97316;
+            color:#fff;
+            border:none;
+            border-radius:10px;
+            padding:11px 0;
+            font-weight:700;
+            font-size:13.5px;
+            cursor:pointer;
+            font-family:'DM Sans',sans-serif;
+            min-height:44px;
+          "
+        >🛒 Grab Deal →</button>
+        ${hasPriceHistory ? `
+          <button
+            onclick="openHistoryModal(${JSON.stringify(deal).replace(/"/g, '&quot;')})"
+            style="
+              background:#1F2937;
+              border:1.5px solid #374151;
+              color:#9CA3AF;
+              border-radius:10px;
+              padding:11px 12px;
+              cursor:pointer;
+              font-size:13px;
+              min-height:44px;
+            "
+            title="Price History"
+          >📊</button>
+        ` : ''}
+      </div>
+    </div>`;
+}
+
+// ── Render deals grid ──────────────────────────────────────────────────────
+function renderDeals(deals) {
+  const grid = document.getElementById('deals-grid');
+  const countEl = document.getElementById('deals-count');
+
+  if (!deals || deals.length === 0) {
+    countEl.textContent = '';
+    grid.innerHTML = `
+      <div style="text-align:center;padding:48px 16px;">
+        <div style="font-size:3rem;margin-bottom:12px;">📭</div>
+        <div class="font-display font-bold text-white" style="font-size:1rem;">No deals available right now.</div>
+        <div style="color:#9CA3AF;font-size:13px;margin-top:6px;">Check back soon! New deals are added daily.</div>
+      </div>`;
+    return;
+  }
+
+  countEl.textContent = `${deals.length} deal${deals.length !== 1 ? 's' : ''} found`;
+  let html = '<div style="display:flex;flex-direction:column;gap:12px;">';
+  deals.forEach((deal, i) => { html += renderCard(deal, i); });
+  html += '</div>';
+  grid.innerHTML = html;
+
+  // Init mini charts after DOM update
+  requestAnimationFrame(() => {
+    deals.forEach((deal, i) => {
+      if (deal.price_history && deal.price_history.length > 1) {
+        const cardId = `card-${deal.id || i}`;
+        const canvas = document.getElementById(`chart-${cardId}`);
+        if (canvas) initMiniChart(canvas, deal.price_history, cardId);
+      }
+    });
+  });
+}
+
+// ── Mini price history chart ───────────────────────────────────────────────
+function initMiniChart(canvas, priceHistory, chartId) {
+  if (activeCharts[chartId]) {
+    activeCharts[chartId].destroy();
+    delete activeCharts[chartId];
+  }
+
+  const labels = priceHistory.map(p => {
+    const d = new Date(p.recorded_at);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  });
+  const prices = priceHistory.map(p => p.price);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const currentPrice = prices[prices.length - 1];
+  const isDown = currentPrice <= minPrice * 1.02;
+
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 130);
+  gradient.addColorStop(0, isDown ? 'rgba(34,197,94,0.25)' : 'rgba(249,115,22,0.25)');
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');
+
+  activeCharts[chartId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: prices,
+        borderColor: isDown ? '#22C55E' : '#F97316',
+        backgroundColor: gradient,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        fill: true,
+        tension: 0.4,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: {
+          label: (ctx) => `₹${Number(ctx.parsed.y).toLocaleString('en-IN')}`
+        }
+      }},
+      scales: {
+        x: { display: false },
+        y: {
+          display: true,
+          position: 'right',
+          ticks: {
+            color: '#6B7280',
+            font: { size: 9 },
+            maxTicksLimit: 3,
+            callback: (v) => '₹' + Number(v).toLocaleString('en-IN'),
+          },
+          grid: { color: 'rgba(55,65,81,0.4)', drawBorder: false },
+          min: Math.floor(minPrice * 0.97),
+          max: Math.ceil(maxPrice * 1.03),
+        }
+      },
+      animation: { duration: 600 },
+    }
+  });
+}
+
+// ── Price History Modal ────────────────────────────────────────────────────
+function openHistoryModal(deal) {
+  const modal = document.getElementById('history-modal');
+  const title = document.getElementById('history-title');
+  const body = document.getElementById('history-modal-body');
+
+  title.textContent = (deal.title || 'Price History').substring(0, 45) + '...';
+
+  const history = deal.price_history || [];
+  const meta = deal.metadata || {};
+
+  let metaHtml = '';
+  if (meta.lowest_ever !== null && meta.lowest_ever !== undefined) {
+    metaHtml += `
+      <div class="grid grid-cols-3 gap-2 mb-4">
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#9CA3AF;">Lowest</div>
+          <div style="font-weight:700;color:#22C55E;font-size:14px;">₹${Number(meta.lowest_ever).toLocaleString('en-IN')}</div>
+        </div>
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#9CA3AF;">Highest</div>
+          <div style="font-weight:700;color:#EF4444;font-size:14px;">₹${Number(meta.highest_ever).toLocaleString('en-IN')}</div>
+        </div>
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#9CA3AF;">Current</div>
+          <div style="font-weight:700;color:#F97316;font-size:14px;">₹${Number(meta.current_price || meta.lowest_ever).toLocaleString('en-IN')}</div>
+        </div>
+      </div>
+      ${meta.is_lowest_now ? '<div style="background:#14532D;border-radius:8px;padding:8px;text-align:center;font-size:12px;color:#22C55E;font-weight:700;margin-bottom:12px;">🏆 This is the LOWEST price in 30 days!</div>' : ''}`;
+  }
+
+  let chartHtml = '';
+  if (history.length > 1) {
+    chartHtml = `
+      <div style="height:180px;position:relative;margin-bottom:16px;">
+        <canvas id="modal-chart"></canvas>
+      </div>`;
+  } else {
+    chartHtml = `<div style="background:#111827;border-radius:10px;padding:20px;text-align:center;color:#6B7280;font-size:13px;margin-bottom:12px;">
+      📊 Not enough price history yet. Data is recorded as users visit this product.
+    </div>`;
+  }
+
+  let tableHtml = '';
+  if (history.length > 0) {
+    tableHtml = `
+      <div style="font-size:11px;color:#9CA3AF;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Recent Price Points</div>
+      <div style="max-height:180px;overflow-y:auto;">`;
+    [...history].reverse().slice(0, 15).forEach(entry => {
+      const d = new Date(entry.recorded_at);
+      const dateStr = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+      tableHtml += `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #374151;">
+          <span style="font-size:12px;color:#9CA3AF;">${dateStr}</span>
+          <span style="font-size:13px;font-weight:600;color:#F9FAFB;">₹${Number(entry.price).toLocaleString('en-IN')}</span>
+        </div>`;
+    });
+    tableHtml += '</div>';
+  }
+
+  body.innerHTML = metaHtml + chartHtml + tableHtml;
+  modal.style.display = 'flex';
+
+  // Init modal chart
+  if (history.length > 1) {
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('modal-chart');
+      if (canvas) {
+        if (activeCharts['modal']) { activeCharts['modal'].destroy(); }
+        const labels = history.map(p => {
+          const d = new Date(p.recorded_at);
+          return `${d.getDate()}/${d.getMonth()+1}`;
+        });
+        const prices = history.map(p => p.price);
+        const ctx = canvas.getContext('2d');
+        activeCharts['modal'] = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: prices,
+              borderColor: '#F97316',
+              backgroundColor: 'rgba(249,115,22,0.12)',
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: '#F97316',
+              fill: true,
+              tension: 0.4,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: (c) => `₹${Number(c.parsed.y).toLocaleString('en-IN')}` }}
+            },
+            scales: {
+              x: { ticks: { color: '#6B7280', font: { size: 10 }, maxTicksLimit: 7 }, grid: { color: 'rgba(55,65,81,0.3)' }},
+              y: {
+                ticks: { color: '#6B7280', font: { size: 10 }, callback: v => '₹'+Number(v).toLocaleString('en-IN') },
+                grid: { color: 'rgba(55,65,81,0.3)' }
+              }
+            }
+          }
+        });
+      }
+    });
+  }
+}
+
+function closeHistoryModal() {
+  document.getElementById('history-modal').style.display = 'none';
+}
+
+// ── Error UI — Routing Critical Error ─────────────────────────────────────
+function showRoutingError(status, rawText) {
+  const grid = document.getElementById('deals-grid');
+  document.getElementById('deals-count').textContent = '';
+  const preview = (rawText || '').substring(0, 200).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  grid.innerHTML = `
+    <div style="
+      background:#1C0505;
+      border:2px solid #EF4444;
+      border-radius:16px;
+      padding:20px;
+      margin-top:8px;
+    ">
+      <div style="font-size:1.3rem;font-weight:800;color:#EF4444;font-family:'Syne',sans-serif;margin-bottom:6px;">
+        ⛔ ROUTING CRITICAL ERROR
+      </div>
+      <div style="color:#FCA5A5;font-size:13px;margin-bottom:14px;">
+        Status: ${status} — Cloudflare Functions are being IGNORED by the build system.
+      </div>
+
+      <div style="color:#F9FAFB;font-size:12.5px;font-weight:700;margin-bottom:8px;">Check these items:</div>
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#FCA5A5;">
+        <div>✗ Folder MUST be named <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">functions</code> (lowercase, plural)</div>
+        <div>✗ Folder MUST be at the <strong>root</strong> of your GitHub repo</div>
+        <div>✗ <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">wrangler.toml</code> MUST NOT exist anywhere</div>
+        <div>✗ Files MUST use <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">export async function onRequest(context)</code></div>
+        <div>✗ <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">_routes.json</code> MUST exist at repo root with <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">/api/*</code> include</div>
+        <div>✗ Expected path: <code style="background:#2D0505;padding:1px 4px;border-radius:4px;">/functions/api/campaigns.js</code></div>
+      </div>
+
+      <div style="margin-top:14px;padding:10px;background:#2D0505;border-radius:8px;">
+        <div style="font-size:10px;color:#9CA3AF;margin-bottom:4px;">Raw server response preview:</div>
+        <pre style="font-size:10px;color:#FCA5A5;white-space:pre-wrap;word-break:break-all;max-height:80px;overflow:hidden;">${preview}</pre>
+      </div>
+
+      <button
+        onclick="loadCampaigns()"
+        style="margin-top:12px;width:100%;background:#EF4444;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;font-size:13px;"
+      >🔄 Retry</button>
+    </div>`;
+}
+
+// ── Error UI — Supabase Error ──────────────────────────────────────────────
+function showSupabaseError(message) {
+  const grid = document.getElementById('deals-grid');
+  document.getElementById('deals-count').textContent = '';
+  const safeMsg = (message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  grid.innerHTML = `
+    <div style="
+      background:#1C0F00;
+      border:2px solid #F97316;
+      border-radius:16px;
+      padding:20px;
+      margin-top:8px;
+    ">
+      <div style="font-size:1.1rem;font-weight:800;color:#F97316;font-family:'Syne',sans-serif;margin-bottom:6px;">
+        ⚠️ Database Connection Error
+      </div>
+      <div style="
+        background:#111827;
+        border-radius:8px;
+        padding:10px;
+        margin-bottom:14px;
+        font-size:12px;
+        color:#FED7AA;
+        word-break:break-all;
+        line-height:1.5;
+      ">${safeMsg}</div>
+
+      <div style="color:#F9FAFB;font-size:12.5px;font-weight:700;margin-bottom:8px;">Troubleshooting:</div>
+      <div style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:#FED7AA;">
+        <div>→ Check <strong>SUPABASE_URL</strong> in Cloudflare Dashboard → Settings → Env Vars</div>
+        <div>→ Check <strong>SUPABASE_KEY</strong> — must be the <code style="background:#2D1500;padding:1px 4px;border-radius:4px;">service_role</code> key (NOT anon key)</div>
+        <div>→ Supabase free tier pauses after inactivity — check your project is active</div>
+        <div>→ Verify <code style="background:#2D1500;padding:1px 4px;border-radius:4px;">campaigns</code> table exists in Supabase Table Editor</div>
+        <div>→ Visit <a href="/api/health" style="color:#F97316;">/api/health</a> to see env var status</div>
+      </div>
+      <button
+        onclick="loadCampaigns()"
+        style="margin-top:12px;width:100%;background:#F97316;color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;font-size:13px;"
+      >🔄 Retry Connection</button>
+    </div>`;
+}
+
+// ── Main Campaigns Loader ──────────────────────────────────────────────────
+async function loadCampaigns() {
+  renderSkeletons(6);
+  document.getElementById('deals-count').textContent = 'Loading...';
+
+  let response, rawText, data;
+
+  try {
+    response = await fetch('/api/campaigns');
+    rawText = await response.text();
+  } catch (networkErr) {
+    showRoutingError('NETWORK_FAIL', networkErr.message);
+    return;
+  }
+
+  try {
+    data = JSON.parse(rawText);
+  } catch (parseErr) {
+    // Not JSON — Cloudflare returned HTML 404 page
+    showRoutingError(response.status, rawText);
+    return;
+  }
+
+  if (!Array.isArray(data)) {
+    showRoutingError('NON_ARRAY_RESPONSE', JSON.stringify(data).substring(0, 300));
+    return;
+  }
+
+  if (data.length > 0 && data[0].is_error === true) {
+    showSupabaseError(data[0].message);
+    return;
+  }
+
+  allCampaigns = data;
+  renderDeals(data);
+}
+
+// ── Search trigger ─────────────────────────────────────────────────────────
+function triggerSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) { renderDeals(allCampaigns); return; }
+  performSearch(q);
+}
+
+async function performSearch(q) {
+  renderSkeletons(4);
+  document.getElementById('deals-count').textContent = 'Searching...';
+
+  try {
+    const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const rawText = await res.text();
+
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch { showRoutingError(res.status, rawText); return; }
+
+    if (!Array.isArray(data)) { showRoutingError('NON_ARRAY', JSON.stringify(data)); return; }
+    if (data.length > 0 && data[0].is_error === true) { showSupabaseError(data[0].message); return; }
+
+    // Handle URL mode response
+    if (data.length === 1 && data[0].mode === 'url') {
+      renderUrlResult(data[0]);
+    } else {
+      renderDeals(data);
+    }
+  } catch (err) {
+    showRoutingError('SEARCH_ERROR', err.message);
+  }
+}
+
+// ── URL product result renderer ────────────────────────────────────────────
+function renderUrlResult(result) {
+  const grid = document.getElementById('deals-grid');
+  const meta = result.metadata || {};
+  const history = result.price_history || [];
+  document.getElementById('deals-count').textContent = 'Product Analysis';
+
+  const metaBadges = getMetaBadges(meta);
+  const historyHtml = history.length > 0
+    ? `<div style="margin:10px 0;">
+        <div style="font-size:11px;color:#9CA3AF;margin-bottom:5px;">30-Day Price History</div>
+        <div style="height:140px;position:relative;">
+          <canvas id="url-result-chart"></canvas>
+        </div>
+       </div>`
+    : `<div style="background:#111827;border-radius:8px;padding:12px;text-align:center;color:#6B7280;font-size:12px;margin:10px 0;">
+        📊 No price history tracked yet for this product.
+       </div>`;
+
+  grid.innerHTML = `
+    <div style="background:#1F2937;border:1.5px solid #F97316;border-radius:16px;padding:16px;">
+      <div style="font-size:12px;color:#F97316;font-weight:700;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+        🔍 Product Analysis — ${(result.platform || 'Unknown').toUpperCase()}
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mb-3">
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:10px;color:#9CA3AF;">30d Low</div>
+          <div style="font-weight:700;color:#22C55E;font-size:13px;">
+            ${meta.lowest_ever != null ? '₹'+Number(meta.lowest_ever).toLocaleString('en-IN') : '—'}
+          </div>
+        </div>
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:10px;color:#9CA3AF;">30d High</div>
+          <div style="font-weight:700;color:#EF4444;font-size:13px;">
+            ${meta.highest_ever != null ? '₹'+Number(meta.highest_ever).toLocaleString('en-IN') : '—'}
+          </div>
+        </div>
+        <div style="background:#111827;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:10px;color:#9CA3AF;">Trend</div>
+          <div style="font-weight:700;font-size:13px;" class="${meta.trend==='dropping'?'trend-drop':meta.trend==='rising'?'trend-rise':'trend-stable'}">
+            ${meta.trend==='dropping'?'📉 Down':meta.trend==='rising'?'📈 Up':'→ Stable'}
+          </div>
+        </div>
+      </div>
+
+      ${meta.is_lowest_now ? '<div style="background:#14532D;border-radius:8px;padding:8px;text-align:center;font-size:12px;color:#22C55E;font-weight:700;margin-bottom:10px;">🏆 Currently at Lowest Price in 30 days!</div>' : ''}
+
+      ${historyHtml}
+
+      <button
+        onclick="handleGrabDeal('${encodeURIComponent(result.platform || '')}','${encodeURIComponent(result.original_url || '#')}')"
+        class="grab-btn"
+        style="width:100%;background:#F97316;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:14px;cursor:pointer;margin-top:4px;font-family:'DM Sans',sans-serif;"
+      >🛒 Shop This Product &amp; Earn Coins →</button>
+    </div>
+
+    ${result.related_campaigns && result.related_campaigns.length > 0 ? `
+      <div style="margin-top:12px;">
+        <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;">Related Deals</div>
+        ${result.related_campaigns.map((c, i) => renderCard(c, i+100)).join('')}
+      </div>` : ''}`;
+
+  // Init chart
+  if (history.length > 1) {
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('url-result-chart');
+      if (canvas) initMiniChart(canvas, history, 'url-result');
+    });
+  }
+}
+
+// ── Grab Deal handler ──────────────────────────────────────────────────────
+function handleGrabDeal(encodedPlat, encodedUrl) {
+  const plat = decodeURIComponent(encodedPlat);
+  const url = decodeURIComponent(encodedUrl);
+  if (!url || url === '#') return;
+  const goUrl = '/go?plat=' + encodeURIComponent(plat) + '&url=' + encodeURIComponent(url);
+  window.open(goUrl, '_blank', 'noopener,noreferrer');
+}
+
+// ── Auth Modal ─────────────────────────────────────────────────────────────
+let currentAuthMode = 'login';
+function showModal(mode) {
+  currentAuthMode = mode;
+  document.getElementById('modal-title').textContent = mode === 'login' ? 'Login to LuckMetric' : 'Create Account';
+  document.getElementById('auth-error').textContent = '';
+  document.getElementById('auth-email').value = '';
+  document.getElementById('auth-password').value = '';
+  const modal = document.getElementById('auth-modal');
+  modal.style.display = 'flex';
+}
+function closeModal() {
+  document.getElementById('auth-modal').style.display = 'none';
+}
+function handleAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  if (!email || !email.includes('@')) { errEl.textContent = 'Please enter a valid email.'; return; }
+  if (!pass || pass.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  errEl.textContent = '';
+  // Future: call /api/auth endpoint
+  errEl.style.color = '#22C55E';
+  errEl.textContent = currentAuthMode === 'login' ? '✓ Logging in...' : '✓ Creating account...';
+  setTimeout(closeModal, 1500);
+}
+
+// ── Search debounce ────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  const searchInput = document.getElementById('search-input');
+
+  searchInput.addEventListener('keyup', function(e) {
+    clearTimeout(searchTimer);
+    const q = this.value.trim();
+
+    // Update hint based on input type
+    const hint = document.getElementById('search-hint');
+    if (q && (q.startsWith('http://') || q.startsWith('https://'))) {
+      hint.textContent = '🔗 URL detected — we\'ll show you price history & comparison!';
+      hint.style.color = '#F97316';
+    } else if (q) {
+      hint.textContent = '🔍 Searching deals across all platforms...';
+      hint.style.color = '#9CA3AF';
+    } else {
+      hint.textContent = '💡 Tip: Paste an Amazon or Flipkart link to see price history & comparison';
+      hint.style.color = '#6B7280';
+    }
+
+    if (e.key === 'Enter') { triggerSearch(); return; }
+
+    if (!q) { renderDeals(allCampaigns); return; }
+
+    searchTimer = setTimeout(() => performSearch(q), 400);
+  });
+
+  // Close modals on backdrop click
+  document.getElementById('auth-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+  document.getElementById('history-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeHistoryModal();
+  });
+
+  // Boot
+  loadCampaigns();
+});
+</script>
+
+</body>
+</html>
