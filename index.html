@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LuckMetric - Compare & Earn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .error-box { background: #fee2e2; border: 2px solid #ef4444; color: #991b1b; padding: 16px; border-radius: 12px; margin: 10px 0; }
+        .error-box h3 { font-weight: bold; margin-bottom: 8px; font-size: 14px; }
+        .error-box p { font-size: 12px; line-height: 1.5; }
+        .error-box code { background: #fff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; word-break: break-all; }
+        .success-box { background: #dcfce7; border: 2px solid #22c55e; color: #166534; padding: 16px; border-radius: 12px; margin: 10px 0; }
+        .success-box h3 { font-weight: bold; margin-bottom: 4px; font-size: 14px; }
+        .success-box p { font-size: 12px; }
+        .warning-box { background: #fef3c7; border: 2px solid #f59e0b; color: #92400e; padding: 16px; border-radius: 12px; margin: 10px 0; }
+        .warning-box h3 { font-weight: bold; margin-bottom: 8px; font-size: 14px; }
+        .warning-box p { font-size: 12px; line-height: 1.5; }
+    </style>
+</head>
+<body class="pb-10">
+
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-b-3xl shadow-lg text-center">
+        <h1 class="text-3xl font-extrabold mb-1"><i class="fa-solid fa-bolt"></i> LuckMetric</h1>
+        <p class="text-sm opacity-90 mb-4">Global Search & Price Compare</p>
+        
+        <div class="relative max-w-md mx-auto text-gray-800 shadow-xl rounded-xl">
+            <input type="text" id="searchInput" placeholder="Search 'iPhone 16' or Paste Link..." class="w-full p-4 rounded-xl outline-none pr-12 font-medium">
+            <button onclick="handleSearch()" class="absolute right-2 top-2 bg-gray-900 text-white p-2 rounded-lg hover:bg-gray-800 transition">
+                <i class="fa-solid fa-search"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Health Check Status Panel -->
+    <div id="healthStatus" class="max-w-md mx-auto mt-4 px-4">
+        <div class="text-center py-6">
+            <div class="loader mx-auto scale-125"></div>
+            <p class="text-sm text-gray-500 mt-3 font-medium">Checking Cloudflare Functions...</p>
+            <p class="text-xs text-gray-400 mt-1">Testing /api/health endpoint</p>
+        </div>
+    </div>
+
+    <!-- Search Results Section -->
+    <div id="searchSection" class="max-w-md mx-auto mt-6 px-4 hidden">
+        <div class="flex justify-between items-center mb-3 border-b pb-2">
+            <h2 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-tags text-orange-500"></i> Compare Prices</h2>
+            <button onclick="closeSearch()" class="text-sm text-red-500 font-bold bg-red-50 px-3 py-1 rounded-full hover:bg-red-100 transition">
+                <i class="fa-solid fa-times"></i> Close
+            </button>
+        </div>
+        <div id="loadingUI" class="flex flex-col items-center justify-center py-12 hidden">
+            <div class="loader mb-3 scale-150"></div>
+            <p class="text-xs text-gray-500 font-medium animate-pulse">Searching global platforms safely...</p>
+        </div>
+        <div id="searchResults" class="space-y-4 mt-2"></div>
+    </div>
+
+    <!-- Home Section with Campaigns -->
+    <div id="homeSection" class="max-w-md mx-auto mt-6 px-4 hidden">
+        <h2 class="text-lg font-bold text-gray-800 mb-3"><i class="fa-solid fa-fire text-orange-500"></i> Top Live Deals</h2>
+        <div id="campaignsList" class="space-y-4">
+            <div class="text-center text-gray-400 py-10">
+                <div class="loader mx-auto scale-150"></div>
+                <p class="text-xs mt-3">Loading campaigns...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== STEP 1: HEALTH CHECK ====================
+        async function checkHealth() {
+            const healthDiv = document.getElementById('healthStatus');
+            const homeSection = document.getElementById('homeSection');
+            
+            try {
+                console.log('[Health Check] Fetching /api/health...');
+                
+                const res = await fetch('/api/health', {
+                    method: 'GET',
+                    headers: { 
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('[Health Check] Status:', res.status);
+                console.log('[Health Check] Content-Type:', res.headers.get('content-type'));
+                
+                // CRITICAL: Handle 404 - Functions not routing
+                if (res.status === 404) {
+                    healthDiv.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> ROUTING CRITICAL ERROR</h3>
+                            <p class="mb-2"><strong>Status:</strong> <code>404 Not Found</code></p>
+                            <p class="mb-2">Cloudflare Functions are being <strong>IGNORED</strong> by the build system.</p>
+                            <p class="mb-2"><strong>Check these items:</strong></p>
+                            <ul class="list-disc ml-5 mb-2">
+                                <li>Folder MUST be named <code>functions</code> (lowercase, plural)</li>
+                                <li>Folder MUST be at the <strong>root</strong> of your GitHub repo</li>
+                                <li><code>wrangler.toml</code> MUST exist at the root</li>
+                                <li>Files MUST use <code>export async function onRequest(context)</code></li>
+                            </ul>
+                            <p><strong>Expected path:</strong> <code>/functions/api/health.js</code></p>
+                        </div>`;
+                    homeSection.classList.add('hidden');
+                    return false;
+                }
+                
+                const text = await res.text();
+                console.log('[Health Check] Raw response:', text.substring(0, 200));
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    healthDiv.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-bug"></i> HEALTH CHECK PARSE ERROR</h3>
+                            <p class="mb-2">Response was not valid JSON. Received:</p>
+                            <code class="block bg-white p-2 rounded">${text.substring(0, 300)}</code>
+                            <p class="mt-2">This usually means the function returned HTML instead of JSON.</p>
+                        </div>`;
+                    homeSection.classList.add('hidden');
+                    return false;
+                }
+                
+                if (data.status === 'ok') {
+                    healthDiv.innerHTML = `
+                        <div class="success-box">
+                            <h3><i class="fa-solid fa-check-circle"></i> Cloudflare Functions Active</h3>
+                            <p>${data.message}</p>
+                        </div>`;
+                    
+                    // Hide health status and show campaigns after 1 second
+                    setTimeout(() => {
+                        healthDiv.classList.add('hidden');
+                        homeSection.classList.remove('hidden');
+                        loadCampaigns();
+                    }, 1000);
+                    return true;
+                } else {
+                    healthDiv.innerHTML = `
+                        <div class="warning-box">
+                            <h3><i class="fa-solid fa-exclamation-triangle"></i> Health Check Warning</h3>
+                            <p>Unexpected response: ${JSON.stringify(data)}</p>
+                        </div>`;
+                    return false;
+                }
+                
+            } catch (e) {
+                console.error('[Health Check] Error:', e);
+                healthDiv.innerHTML = `
+                    <div class="error-box">
+                        <h3><i class="fa-solid fa-network-wired"></i> Network Error</h3>
+                        <p class="mb-2">Could not connect to <code>/api/health</code></p>
+                        <p><strong>Error:</strong> ${e.message}</p>
+                        <p class="mt-2 text-xs">Check your internet connection and try refreshing.</p>
+                    </div>`;
+                homeSection.classList.add('hidden');
+                return false;
+            }
+        }
+
+        // ==================== STEP 2: LOAD CAMPAIGNS ====================
+        async function loadCampaigns() {
+            const container = document.getElementById('campaignsList');
+            container.innerHTML = `
+                <div class="text-center py-6">
+                    <div class="loader mx-auto"></div>
+                    <p class="text-xs text-gray-500 mt-2">Loading campaigns from Supabase...</p>
+                </div>`;
+            
+            try {
+                console.log('[Campaigns] Fetching /api/campaigns...');
+                
+                const res = await fetch('/api/campaigns', {
+                    method: 'GET',
+                    headers: { 
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('[Campaigns] Status:', res.status);
+                
+                // Handle 404 for campaigns endpoint
+                if (res.status === 404) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> /api/campaigns Not Found (404)</h3>
+                            <p class="mb-2">Cloudflare cannot find the campaigns function.</p>
+                            <p class="mb-2"><strong>Expected file:</strong> <code>functions/api/campaigns.js</code></p>
+                            <p>Verify this file exists in your GitHub repository at the exact path.</p>
+                        </div>`;
+                    return;
+                }
+                
+                const text = await res.text();
+                console.log('[Campaigns] Raw response:', text.substring(0, 200));
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-bug"></i> JSON Parse Error</h3>
+                            <p class="mb-2">Could not parse response from /api/campaigns:</p>
+                            <code class="block bg-white p-2 rounded text-xs">${text.substring(0, 400)}</code>
+                        </div>`;
+                    return;
+                }
+                
+                // Check for backend error object
+                if (Array.isArray(data) && data.length > 0 && data[0].is_error) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-server"></i> Backend Error</h3>
+                            <p>${data[0].message}</p>
+                        </div>`;
+                    return;
+                }
+                
+                // Check for error property (alternative format)
+                if (data.error) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-server"></i> Backend Error</h3>
+                            <p>${data.error}</p>
+                        </div>`;
+                    return;
+                }
+                
+                // Validate data is array
+                if (!Array.isArray(data)) {
+                    container.innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-bug"></i> Invalid Data Format</h3>
+                            <p>Expected array, received: ${typeof data}</p>
+                            <code class="block bg-white p-2 rounded text-xs mt-2">${JSON.stringify(data).substring(0, 200)}</code>
+                        </div>`;
+                    return;
+                }
+                
+                // Handle empty array
+                if (data.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fa-solid fa-inbox text-gray-300 text-4xl mb-3"></i>
+                            <p class="text-gray-500 text-sm">No campaigns found in database.</p>
+                        </div>`;
+                    return;
+                }
+                
+                // Render campaigns
+                container.innerHTML = '';
+                data.forEach((deal, index) => {
+                    let plat = deal.platform ? deal.platform.toLowerCase() : 'unknown';
+                    let platColor = plat.includes('amazon') ? 'bg-amber-500' : 
+                                   plat.includes('flipkart') ? 'bg-blue-600' : 'bg-rose-500';
+                    
+                    const card = document.createElement('div');
+                    card.className = 'bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col hover:shadow-md transition duration-200';
+                    card.style.animation = `fadeIn 0.3s ease ${index * 0.05}s both`;
+                    
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="${platColor} text-white text-[10px] font-bold px-2.5 py-1 rounded uppercase tracking-wider">
+                                ${deal.platform || 'DEAL'}
+                            </span>
+                            <span class="bg-green-100 text-green-700 text-[10px] font-bold px-2.5 py-1 rounded uppercase">
+                                ${deal.user_luck_coins_text || 'Variable %'}
+                            </span>
+                        </div>
+                        <h3 class="text-sm font-bold text-gray-800 mb-3 leading-snug line-clamp-2">
+                            ${deal.title || 'Untitled Deal'}
+                        </h3>
+                        <a href="/go?plat=${encodeURIComponent(plat)}&url=${encodeURIComponent(deal.original_link || '')}" 
+                           target="_blank" 
+                           class="w-full text-center bg-gray-900 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-orange-500 transition duration-300">
+                            Grab Deal <i class="fa-solid fa-arrow-up-right-from-square ml-1 text-xs"></i>
+                        </a>
+                    `;
+                    container.appendChild(card);
+                });
+                
+            } catch (e) {
+                console.error('[Campaigns] Error:', e);
+                container.innerHTML = `
+                    <div class="error-box">
+                        <h3><i class="fa-solid fa-network-wired"></i> Network Error</h3>
+                        <p>Failed to load campaigns: ${e.message}</p>
+                    </div>`;
+            }
+        }
+
+        // ==================== SEARCH FUNCTIONALITY ====================
+        async function handleSearch() {
+            let query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            // Extract product name from URL if pasted
+            if (query.startsWith('http')) {
+                try {
+                    let urlObj = new URL(query);
+                    let slug = urlObj.pathname.split('/').filter(x => x.length > 3)[0] || "";
+                    query = slug.replace(/[-_]/g, ' ') || query;
+                } catch (e) {}
+            }
+
+            document.getElementById('homeSection').classList.add('hidden');
+            document.getElementById('searchSection').classList.remove('hidden');
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('loadingUI').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                
+                if (res.status === 404) {
+                    document.getElementById('loadingUI').classList.add('hidden');
+                    document.getElementById('searchResults').innerHTML = `
+                        <div class="error-box">
+                            <h3><i class="fa-solid fa-triangle-exclamation"></i> /api/search Not Found (404)</h3>
+                            <p>Check that <code>functions/api/search.js</code> exists in your repository.</p>
+                        </div>`;
+                    return;
+                }
+                
+                const data = await res.json();
+                document.getElementById('loadingUI').classList.add('hidden');
+
+                if (data.status === 'success' && data.platforms) {
+                    let resultsHTML = '';
+                    for (const [platform, details] of Object.entries(data.platforms)) {
+                        let platColor = platform.includes('amazon') ? 'bg-amber-500' : 
+                                       platform.includes('flipkart') ? 'bg-blue-600' : 'bg-gray-800';
+                        resultsHTML += `
+                            <div class="bg-white p-4 flex justify-between items-center rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition">
+                                <div>
+                                    <div class="${platColor} inline-block text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide mb-1">
+                                        ${platform}
+                                    </div>
+                                    <div class="font-extrabold text-gray-900 text-xl">
+                                        ₹${details.price.toLocaleString('en-IN')}
+                                    </div>
+                                </div>
+                                <a href="/go?plat=${encodeURIComponent(platform)}&url=${encodeURIComponent(details.link)}" 
+                                   target="_blank" 
+                                   class="bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow hover:bg-orange-600 active:scale-95 transition">
+                                    Buy Now
+                                </a>
+                            </div>
+                        `;
+                    }
+                    document.getElementById('searchResults').innerHTML = resultsHTML;
+                } else {
+                    document.getElementById('searchResults').innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fa-solid fa-search text-gray-300 text-3xl mb-3"></i>
+                            <p class="text-gray-500 text-sm">No exact match found or blocked by platform.</p>
+                        </div>`;
+                }
+            } catch (e) {
+                document.getElementById('loadingUI').classList.add('hidden');
+                document.getElementById('searchResults').innerHTML = `
+                    <div class="error-box">
+                        <h3><i class="fa-solid fa-network-wired"></i> Search Error</h3>
+                        <p>${e.message}</p>
+                    </div>`;
+            }
+        }
+
+        function closeSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchSection').classList.add('hidden');
+            document.getElementById('homeSection').classList.remove('hidden');
+        }
+
+        // Initialize: Start with health check
+        window.onload = checkHealth;
+    </script>
+</body>
+</html>
